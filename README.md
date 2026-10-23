@@ -9,7 +9,7 @@ Red, blue, and purple team tools built in Python, Go, and Rust.
 - `notes/`: sanitized study notes
 
 ## Roadmap
-- [ ] Async port scanner (red-team)
+- [x] FlyBy recon tool (red-team)
 - [ ] SSH brute-force log detector (blue-team)
 - [ ] Purple-team harness
 - [ ] AWS S3 misconfiguration auditor
