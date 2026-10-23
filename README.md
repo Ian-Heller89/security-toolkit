@@ -1,2 +1,2 @@
 # security-toolkit
-Red, blue, and purple team tools built in Python, Go, and Rust.
+Red, Blue, and Purple team tools built in Python, Go, and Rust.
