@@ -1,6 +1,6 @@
 # 🛡️ Enterprise Security Toolkit
 
-A multi-disciplinary, high-performance security simulation, operational auditing, and real-time defense monitoring platform featuring production-ready tooling written in **Python** and native **Windows PowerShell**. This repository serves as a centralized operational hub showcasing modular implementations across offensive engineering (**Red Team**) and telemetry detection forensics (**Blue Team**).
+A multi-disciplinary, high-performance security simulation, operational auditing, and real-time defense validation platform featuring production-ready tooling written in **Python 3** and native **Windows PowerShell**. This repository serves as a centralized operational hub showcasing modular implementations across offensive engineering (**Red Team**), telemetry detection forensics (**Blue Team**), and collaborative testing automation (**Purple Team**).
 
 ## 🗂️ Repository Architecture
 
@@ -16,6 +16,10 @@ security-toolkit/
 │   ├── sentry_check/      # Multi-sector cryptographic file integrity monitor (FIM)
 │   ├── ghost_watch/       # Windows native memory process anomaly detection engine
 │   └── deep_trace/        # Windows native incident response forensic triage harvester
+├── purple-team/
+│   └── harness_core/
+│       ├── linux/         # Python 3 MITRE ATT&CK emulation & log validation engine
+│       └── windows/       # PowerShell MITRE ATT&CK emulation & kernel validation engine
 └── notes/                 # Sanitized architectural research, protocols, and study logs
 ```
 
@@ -39,7 +43,7 @@ security-toolkit/
 
 4. **Shadow Haul: High-Value Asset Cryptographic Staging Suite**
    *   *Utility:* Automatically identifies and harvests critical corporate documents, private keys, and database configurations using a strict 26-extension whitelist, packing them into encrypted structures.
-   *   *Implementation:* Enforces zero-interaction path expansion and military-grade **AES-256 Symmetric Encryption** (utilizing native Windows .NET and Mac OpenSSL libraries). Features volatile RAM memory scrubbing, silent input console history evasion, privilege-safe fallback error-trapping, and file timestamp metadata timestomping.
+   *   *Implementation:* Enforces zero-interaction path expansion and military-grade **AES-256 Symmetric Encryption** [11] (utilizing native Windows .NET and Mac OpenSSL libraries). Features volatile RAM memory scrubbing, silent input console history evasion, privilege-safe fallback error-trapping, and file timestamp metadata timestomping.
 
 ### 🔵 Defensive Operations & Incident Response (Blue Team)
 
@@ -59,12 +63,20 @@ security-toolkit/
    *   *Utility:* Automates rapid, volatile evidence acquisition and host data carving during active compromise scenarios to capture forensic indicators before they vanish from memory.
    *   *Implementation:* Native PowerShell script that harvests outbound/listening network sockets, carves cleartext console history caches (`ConsoleHost_history.txt`), extracts memory-resident DNS client lookups, and captures active terminal user sessions. All extracted datasets are programmatically compiled into a standalone, human-readable **HTML Investigator Dashboard Report** for immediate tactical evaluation.
 
+### 🟣 Coordinated Continuous Validation (Purple Team)
+
+1. **HarnessCore: Cross-Platform MITRE ATT&CK Testing Suite**
+   *   *Utility:* Combines offensive tactical execution and defensive validation tracking into an automated, single-command system posture checking loop.
+   *   *Implementation:* Split into separate, specialized cross-platform automation scripts to evaluate environments completely natively:
+       *   **Linux Component (`.py`):** Coordinates safe local simulations for command interpreter execution (**T1059.004**), unauthorized infrastructure file modifications (**T1485**), and credential account persistence indicators (**T1136.001**), cross-checking disk and log arrays for tracking visibility.
+       *   **Windows Component (`.ps1`):** Leverages native PowerShell to trigger hidden scripting execution (**T1059.001**), hidden file attribute injections (**T1564.001**), and core system binary masquerading (**T1036.005**), programmatically querying the **CIM process tables** and Win32 file handles to detect security blind spots.
+
 ---
 
 ## 🛠️ Operational Engineering Roadmap
 
-*   **Purple Team Folder (Phase 1):** Developing collaborative continuous attack/detection harnesses dynamically mapped to automated MITRE ATT&CK testing pathways.
 *   **Cloud Infrastructure Auditing:** Building an automated multi-tenant AWS S3 bucket misconfiguration and IAM policy drift analyzer.
+*   **Active Directory Posture Hardening:** Engineering an automated Kerberoasting and AS-REP roasting tracking baseline validation script.
 
 ## ⚖️ Legal & Ethical Compliance Policy
 
