@@ -7,7 +7,7 @@ A multi-disciplinary, high-performance security simulation and auditing platform
 ```text
 security-toolkit/
 ├── red-team/
-│   ├── 01_port_scanner/   # Multi-threaded concurrent network recon scanner
+│   ├── flyby/             # Multi-threaded concurrent network recon scanner
 │   ├── lockpick/          # Cross-platform payload factory & raw TCP command listener
 │   └── quitemouse/        # Host-agnostic post-exploitation audit engine & memory stager
 ├── blue-team/             # Telemetry log analysis, network monitoring, and signature detection
@@ -19,7 +19,7 @@ security-toolkit/
 
 ## 🚀 Active Production Tooling (Red Team Index)
 
-### 1. Concurrency Network Port Scanner
+### 1. FlyBy: Concurrency Network Port Scanner
 *   **Core Utility:** Executes high-speed asynchronous port discovery and target-facing banner grabbing across open boundaries to identify exposed network footprints.
 *   **Technical Implementation:** Written using multi-threaded execution pools to optimize transmission socket throughput without exhausting local descriptor pipelines.
 
