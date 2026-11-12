@@ -1,211 +1,363 @@
-# HarnessCore: Automated Windows Threat Emulation Validation Engine
-# Path: purple_team/harness_core/windows/harness_core.ps1
-# Language: Pure Windows PowerShell (.ps1) - Hardened Enterprise Baseline
+<#
+.SYNOPSIS
+    HarnessCore: Automated Windows MITRE ATT&CK Emulation & Validation Harness (VM lab use).
 
-$PURPLE_LOG = "purple_validation_report.json"
+.DESCRIPTION
+    Triggers safe, non-destructive emulations of selected ATT&CK techniques, then validates
+    that the artifact exists (CIM / filesystem) AND that your logging stack actually recorded it
+    (Security 4688, PowerShell 4104, Sysmon 1/11). Results go to purple_validation_report.json.
+
+    Techniques:
+      T1059.001  Command and Scripting Interpreter: PowerShell
+      T1564.001  Hide Artifacts: Hidden Files and Directories
+      T1036.005  Masquerading: Match Legitimate Name or Location
+
+.PARAMETER Technique
+    Run a single technique non-interactively.
+
+.PARAMETER All
+    Run all techniques non-interactively.
+
+.PARAMETER NoCleanup
+    Leave mock artifacts on disk (default behavior is to clean up on exit).
+
+.EXAMPLE
+    .\HarnessCore.ps1                       # interactive menu
+    .\HarnessCore.ps1 -All                  # run everything, print summary
+    .\HarnessCore.ps1 -Technique T1564.001  # run one technique
+
+.NOTES
+    Run from an elevated PowerShell in an isolated lab VM only.
+    If blocked by execution policy:  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+#>
+
+[CmdletBinding()]
+param (
+    [ValidateSet("T1059.001", "T1564.001", "T1036.005")]
+    [string]$Technique,
+    [switch]$All,
+    [switch]$NoCleanup
+)
+
+# ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
+$ScriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+$script:ReportPath = Join-Path $ScriptRoot "purple_validation_report.json"
+$script:HiddenFile = Join-Path $env:TEMP "mock_hidden_attrib.tmp"
+$script:SpoofDir   = Join-Path $env:TEMP "shadow_triage"
+$script:SpoofFile  = Join-Path $script:SpoofDir "svchost.exe"
+$script:Marker     = "HarnessCore"
+
+$Techniques = [ordered]@{
+    "1" = @{ Id = "T1059.001"; Name = "PowerShell Script Interpreter" }
+    "2" = @{ Id = "T1564.001"; Name = "Hidden Files and Directories" }
+    "3" = @{ Id = "T1036.005"; Name = "Masquerading: Match Legitimate Name" }
+}
+
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
 function Show-Banner {
     Clear-Host
-    Write-Output "================================================================================"
-    Write-Output "                                  HARNESS CORE"
-    Write-Output "          MITRE ATT&CK AUTOMATED PURPLE TEAM HARNESS (WINDOWS - HARDENED)"
-    Write-Output "================================================================================"
-    Write-Output ""
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host "                                  HARNESS CORE" -ForegroundColor Cyan
+    Write-Host "          MITRE ATT&CK AUTOMATED PURPLE TEAM HARNESS (WINDOWS)" -ForegroundColor Cyan
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    Write-Host ""
 }
 
-function Invoke-RedVector {
+function Get-UtcStamp { [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss") }
+
+function Test-EventTelemetry {
+    <# Returns "Logged", "NotLogged", or "LogUnavailable" #>
     param (
-        [string]$TechniqueId
+        [string]$LogName,
+        [int[]]$Ids,
+        [string]$Pattern,
+        [datetime]$Since
     )
-    Write-Output "`n[!] EMULATING OFFENSIVE VECTOR: $TechniqueId"
-    $timestamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
-    
+    try {
+        $events = Get-WinEvent -FilterHashtable @{ LogName = $LogName; Id = $Ids; StartTime = $Since } -ErrorAction Stop
+        $hit = $events | Where-Object { $_.Message -like "*$Pattern*" } | Select-Object -First 1
+        if ($hit) { return "Logged" } else { return "NotLogged" }
+    } catch {
+        if ($_.FullyQualifiedErrorId -like "*NoMatchingEventsFound*") { return "NotLogged" }
+        return "LogUnavailable"
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Red: emulation vectors (benign)
+# ------------------------------------------------------------------------------
+function Invoke-RedVector {
+    param ([string]$TechniqueId)
+
+    Write-Host "`n[!] EMULATING OFFENSIVE VECTOR: $TechniqueId" -ForegroundColor Yellow
+    $start = Get-Date
+
     switch ($TechniqueId) {
-        "T1059.001" { # Command and Scripting Interpreter: PowerShell
-            Write-Output "[*] Simulating background hidden script interpreter spawning..."
+
+        "T1059.001" {
+            Write-Host "[*] Spawning hidden PowerShell child process (benign sleep)..."
             try {
-                # Spawning a benign background execution hook to safely generate process telemetry
-                $proc = Start-Process powershell.exe -ArgumentList "-NoProfile -NonInteractive -Command Start-Sleep -Seconds 1" -PassThru -WindowStyle Hidden
-                return @{ "status" = "Executed"; "time" = $timestamp; "pid" = $proc.Id; "msg" = "Benign hidden PowerShell process initiated successfully." }
+                $cmd = "Start-Sleep -Seconds 15 # $($script:Marker)-T1059"
+                $proc = Start-Process -FilePath "powershell.exe" `
+                    -ArgumentList @("-NoProfile", "-NonInteractive", "-Command", $cmd) `
+                    -WindowStyle Hidden -PassThru -ErrorAction Stop
+                return @{ status = "Executed"; time = Get-UtcStamp; start = $start; pid = $proc.Id
+                          msg = "Hidden PowerShell process started (PID $($proc.Id))." }
             } catch {
-                return @{ "status" = "Failed"; "time" = $timestamp; "msg" = $_.Exception.Message }
+                return @{ status = "Failed"; time = Get-UtcStamp; start = $start; msg = $_.Exception.Message }
             }
         }
-        
-        "T1564.001" { # Hidden Files and Directories
-            Write-Output "[*] Simulating stealthy hidden asset file placement..."
-            $mockFile = Join-Path $env:TEMP "mock_hidden_attrib.tmp"
+
+        "T1564.001" {
+            Write-Host "[*] Creating file and setting the Hidden attribute..."
             try {
-                if (Test-Path $mockFile) { Remove-Item $mockFile -Force }
-                "PurpleTeam_Hidden_Trace_Signature" | Out-File $mockFile -Encoding UTF8 -Force
-                # Call native Windows filesystem attribute parameters to forensically hide the document
-                $fileItem = Get-Item $mockFile -Force
-                $fileItem.Attributes = "Hidden"
-                return @{ "status" = "Executed"; "time" = $timestamp; "target" = $mockFile; "msg" = "Hidden attribute injected into mock asset file." }
+                if (Test-Path $script:HiddenFile) {
+                    (Get-Item $script:HiddenFile -Force).Attributes = "Normal"
+                    Remove-Item $script:HiddenFile -Force
+                }
+                "PurpleTeam_Hidden_Trace_Signature" | Out-File $script:HiddenFile -Encoding UTF8 -Force
+                (Get-Item $script:HiddenFile -Force).Attributes = "Hidden"
+                return @{ status = "Executed"; time = Get-UtcStamp; start = $start; target = $script:HiddenFile
+                          msg = "Hidden attribute applied to mock file." }
             } catch {
-                return @{ "status" = "Failed"; "time" = $timestamp; "msg" = $_.Exception.Message }
+                return @{ status = "Failed"; time = Get-UtcStamp; start = $start; msg = $_.Exception.Message }
             }
         }
-        
-        "T1036.005" { # Masquerading: Match Legitimate Name
-            Write-Output "[*] Simulating malicious core system binary name spoofing..."
-            $mockDir = Join-Path $env:TEMP "shadow_triage"
-            if (-not (Test-Path $mockDir)) { New-Item -ItemType Directory -Path $mockDir -Force | Out-Null }
-            $mockSpoof = Join-Path $mockDir "svchost.exe"
-            
+
+        "T1036.005" {
+            Write-Host "[*] Dropping a text file named svchost.exe in a non-system path..."
             try {
-                if (Test-Path $mockSpoof) { Remove-Item $mockSpoof -Force }
-                "Simulated_Masquerade_Payload_Block" | Out-File $mockSpoof -Encoding UTF8 -Force
-                return @{ "status" = "Executed"; "time" = $timestamp; "target" = $mockSpoof; "msg" = "Rogue script masqueraded under legitimate binary identity." }
+                if (-not (Test-Path $script:SpoofDir)) {
+                    New-Item -ItemType Directory -Path $script:SpoofDir -Force | Out-Null
+                }
+                if (Test-Path $script:SpoofFile) { Remove-Item $script:SpoofFile -Force }
+                "Simulated_Masquerade_Payload_Block" | Out-File $script:SpoofFile -Encoding UTF8 -Force
+                return @{ status = "Executed"; time = Get-UtcStamp; start = $start; target = $script:SpoofFile
+                          msg = "Non-executable file masquerading as svchost.exe created outside System32." }
             } catch {
-                return @{ "status" = "Failed"; "time" = $timestamp; "msg" = $_.Exception.Message }
+                return @{ status = "Failed"; time = Get-UtcStamp; start = $start; msg = $_.Exception.Message }
             }
         }
     }
-    return @{ "status" = "Skipped"; "time" = $timestamp; "msg" = "Unmapped vector profile matched." }
+    return @{ status = "Skipped"; time = Get-UtcStamp; start = $start; msg = "Unmapped technique." }
 }
+
+# ------------------------------------------------------------------------------
+# Blue: telemetry validation
+# ------------------------------------------------------------------------------
 function Get-BlueValidation {
     param (
         [string]$TechniqueId,
         [hashtable]$RedResult
     )
-    Write-Output "[*] RUNNING BLUE TEAM telemetry validation check for: $TechniqueId"
-    Start-Sleep -Seconds 1 # Allow volatile memory buffers and file pointers a moment to synchronize
-    
+
+    Write-Host "[*] RUNNING BLUE TEAM validation for: $TechniqueId" -ForegroundColor Green
+
     if ($RedResult.status -ne "Executed") {
-        Write-Output "[-] Telemetry Audit Skipped: Attack vector simulation was not executed successfully."
-        return "Unknown - Simulation Failed"
+        Write-Host "[-] Skipped: emulation did not execute." -ForegroundColor DarkYellow
+        return [ordered]@{ Verdict = "Unknown - Simulation Failed"; Artifact = "N/A"; Events = @{} }
     }
 
+    Start-Sleep -Seconds 3   # let event log writers flush
+    $since = ($RedResult.start).AddSeconds(-2)
+    $artifact = "Missing"
+    $events = [ordered]@{}
+
     switch ($TechniqueId) {
+
         "T1059.001" {
-            # Advanced Process Telemetry Validation: Queries the Windows subsystem natively via CIM
-            $targetPid = $RedResult.pid
-            try {
-                $procCheck = Get-CimInstance Win32_Process -Filter "ProcessId = $targetPid" -ErrorAction SilentlyContinue
-                if ($procCheck) {
-                    Write-Output "[+] VALIDATION SUCCESS: Active process execution trace verified in kernel memory arrays."
-                    return "Pass (Telemetry Visible)"
-                }
-                Write-Output "[!!!] VALIDATION CRITICAL FAILURE: Process ID $targetPid not discovered in active kernel tables."
-                return "Fail (Blindspot Detected)"
-            } catch {
-                return "Fail (Exception Encountered)"
+            $p = Get-CimInstance Win32_Process -Filter "ProcessId = $($RedResult.pid)" -ErrorAction SilentlyContinue
+            if ($p -and $p.CommandLine -like "*$($script:Marker)*") {
+                $artifact = "Present"
+                Write-Host "[+] CIM: process $($RedResult.pid) visible with marker in command line." -ForegroundColor Green
+            } elseif ($p) {
+                $artifact = "Present"
+                Write-Host "[+] CIM: process $($RedResult.pid) visible (command line not exposed)." -ForegroundColor Green
+            } else {
+                Write-Host "[!] CIM: process $($RedResult.pid) not found." -ForegroundColor Red
             }
+            $events["Security_4688"]       = Test-EventTelemetry "Security" @(4688) $script:Marker $since
+            $events["PowerShell_4104"]     = Test-EventTelemetry "Microsoft-Windows-PowerShell/Operational" @(4104) $script:Marker $since
+            $events["Sysmon_1"]            = Test-EventTelemetry "Microsoft-Windows-Sysmon/Operational" @(1) $script:Marker $since
         }
 
         "T1564.001" {
-            # Advanced File Attribute Validation: Interrogates native handle properties directly
-            $targetPath = $RedResult.target
-            try {
-                if (Test-Path $targetPath -ErrorAction SilentlyContinue) {
-                    $fileCheck = Get-Item $targetPath -Force -ErrorAction SilentlyContinue
-                    if ($fileCheck.Attributes -match "Hidden") {
-                        Write-Output "[+] VALIDATION SUCCESS: Hidden attribute anomaly captured on disk."
-                        return "Pass (Telemetry Visible)"
-                    }
-                }
-                Write-Output "[!!!] VALIDATION CRITICAL FAILURE: File metadata missing target hidden attributes."
-                return "Fail (Blindspot Detected)"
-            } catch {
-                return "Fail (Exception Encountered)"
+            $item = Get-Item $RedResult.target -Force -ErrorAction SilentlyContinue
+            if ($item -and ($item.Attributes -band [IO.FileAttributes]::Hidden)) {
+                $artifact = "Present"
+                Write-Host "[+] FS: Hidden attribute confirmed on $($RedResult.target)" -ForegroundColor Green
+            } else {
+                Write-Host "[!] FS: Hidden attribute not found." -ForegroundColor Red
             }
+            $events["Sysmon_11_FileCreate"] = Test-EventTelemetry "Microsoft-Windows-Sysmon/Operational" @(11) "mock_hidden_attrib" $since
         }
 
         "T1036.005" {
-            # Advanced Directory Spoofing Validation: Confirms rogue file footprint presence in Temp locations
-            $targetPath = $RedResult.target
-            try {
-                if (Test-Path $targetPath -ErrorAction SilentlyContinue) {
-                    if ((Get-Item $targetPath -Force).Length -gt 0) {
-                        Write-Output "[+] VALIDATION SUCCESS: Masquerading signature footprint discovered inside triage workspace."
-                        return "Pass (Telemetry Visible)"
-                    }
-                }
-                Write-Output "[!!!] VALIDATION CRITICAL FAILURE: Masquerade target file absent or zero bytes."
-                return "Fail (Blindspot Detected)"
-            } catch {
-                return "Fail (Exception Encountered)"
+            $item = Get-Item $RedResult.target -Force -ErrorAction SilentlyContinue
+            if ($item -and $item.Length -gt 0 -and $item.DirectoryName -notlike "$env:SystemRoot\System32*") {
+                $artifact = "Present"
+                Write-Host "[+] FS: svchost.exe found outside System32 at $($RedResult.target)" -ForegroundColor Green
+            } else {
+                Write-Host "[!] FS: masquerade file missing or empty." -ForegroundColor Red
             }
+            $events["Sysmon_11_FileCreate"] = Test-EventTelemetry "Microsoft-Windows-Sysmon/Operational" @(11) "shadow_triage" $since
         }
     }
-    return "Indeterminate"
-}
 
-function Execute-PurpleCycle {
-    param (
-        [string]$TechniqueId
-    )
-    Write-Output ("=" * 80)
-    Write-Output "               PURPLE TEAM VERIFICATION CYCLE: TECHNIQUE $TechniqueId"
-    Write-Output ("=" * 80)
-
-    # 1. Run the offensive emulation vector
-    $redReport = Invoke-RedVector -TechniqueId $TechniqueId
-
-    # 2. Run the defensive telemetry validation verification loop
-    $blueStatus = Get-BlueValidation -TechniqueId $TechniqueId -RedResult $redReport
-
-    # 3. Log results to system validation tracking array serialized as JSON
-    $cycleReport = [ordered]@{
-        "TechniqueID"    = $TechniqueId
-        "Timestamp"      = [DateTime]::UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
-        "RedSimulation"  = $redReport
-        "BlueValidation" = $blueStatus
+    foreach ($k in $events.Keys) {
+        $color = switch ($events[$k]) { "Logged" { "Green" } "NotLogged" { "Red" } default { "DarkYellow" } }
+        Write-Host ("    {0,-22} {1}" -f $k, $events[$k]) -ForegroundColor $color
     }
 
+    $logged = @($events.Values | Where-Object { $_ -eq "Logged" }).Count
+    $verdict =
+        if     ($artifact -ne "Present") { "Fail (Emulation Artifact Missing)" }
+        elseif ($logged -gt 0)           { "Pass (Telemetry Visible)" }
+        else                             { "Partial (Artifact Seen, No Log Telemetry)" }
+
+    return [ordered]@{ Verdict = $verdict; Artifact = $artifact; Events = $events }
+}
+
+# ------------------------------------------------------------------------------
+# Reporting
+# ------------------------------------------------------------------------------
+function Save-CycleReport {
+    param ($Report)
     try {
         $reports = @()
-        if (Test-Path $global:PURPLE_LOG) {
-            $reports = Get-Content $global:PURPLE_LOG -Raw | ConvertFrom-Json
-            if ($reports -isnot [array]) { $reports = @($reports) }
+        if (Test-Path $script:ReportPath) {
+            $raw = Get-Content $script:ReportPath -Raw -ErrorAction Stop
+            if ($raw.Trim()) { $reports = @($raw | ConvertFrom-Json) }
         }
-        $reports += $cycleReport
-        $reports | ConvertTo-Json -Depth 5 | Out-File $global:PURPLE_LOG -Encoding UTF8 -Force
+        $reports += $Report
+        ConvertTo-Json -InputObject @($reports) -Depth 6 | Out-File $script:ReportPath -Encoding UTF8 -Force
     } catch {
-        Write-Output "[-] Failed to write purple validation metrics log: $_"
+        Write-Host "[-] Failed to write report: $($_.Exception.Message)" -ForegroundColor Red
     }
-
-    Write-Output ("`n" + "-" * 80)
-    Write-Output "[=] EMULATION CYCLE OUTCOME FOR $TechniqueId: STATUS = $blueStatus"
-    Write-Output ("-" * 80)
 }
 
-function Main {
-    while ($true) {
-        Show-Banner
-        Write-Output "--- Windows Coordinated Purple Team Emulation Selector ---"
-        Write-Output " Run Coordinated Cycle: T1059.001 (PowerShell Script Interpreter)"
-        Write-Output " Run Coordinated Cycle: T1564.001 (Hidden Files and Directories)"
-        Write-Output " Run Coordinated Cycle: T1036.005 (Masquerading: Match Legitimate Name)"
-        Write-Output " Exit Coordinated Harness Suite Entirely"
-        Write-Output "--------------------------------------------------------------------------------"
+function Show-Summary {
+    if (-not (Test-Path $script:ReportPath)) {
+        Write-Host "[-] No report found yet. Run a cycle first." -ForegroundColor DarkYellow
+        return
+    }
+    $reports = @(Get-Content $script:ReportPath -Raw | ConvertFrom-Json)
+    Write-Host ("`n" + ("=" * 80)) -ForegroundColor Cyan
+    Write-Host "                         VALIDATION SUMMARY ($($reports.Count) runs)" -ForegroundColor Cyan
+    Write-Host ("=" * 80) -ForegroundColor Cyan
+    $reports | ForEach-Object {
+        [pscustomobject]@{
+            Time      = $_.Timestamp
+            Technique = $_.TechniqueID
+            Verdict   = $_.BlueValidation.Verdict
+        }
+    } | Format-Table -AutoSize | Out-String | Write-Host
+    Write-Host "Report file: $script:ReportPath"
+}
 
-        $choice = Read-Host "`n[?] Select Coordinated Execution Cycle (1-3 / 999)"
-        if ($null -ne $choice) { $choice = $choice.Trim() }
+# ------------------------------------------------------------------------------
+# Orchestration
+# ------------------------------------------------------------------------------
+function Invoke-PurpleCycle {
+    param ([string]$TechniqueId)
+
+    Write-Host ("=" * 80)
+    Write-Host "               PURPLE TEAM VERIFICATION CYCLE: TECHNIQUE $TechniqueId"
+    Write-Host ("=" * 80)
+
+    $red  = Invoke-RedVector -TechniqueId $TechniqueId
+    Write-Host "    $($red.msg)"
+    $blue = Get-BlueValidation -TechniqueId $TechniqueId -RedResult $red
+
+    $redClean = @{}
+    foreach ($k in $red.Keys) { if ($k -ne "start") { $redClean[$k] = $red[$k] } }
+
+    Save-CycleReport ([ordered]@{
+        TechniqueID    = $TechniqueId
+        Timestamp      = Get-UtcStamp
+        RedSimulation  = $redClean
+        BlueValidation = $blue
+    })
+
+    Write-Host ("`n" + ("-" * 80))
+    Write-Host "[=] OUTCOME FOR ${TechniqueId}: $($blue.Verdict)" -ForegroundColor Cyan
+    Write-Host ("-" * 80)
+}
+
+function Remove-MockArtifacts {
+    try {
+        if (Test-Path $script:HiddenFile) {
+            (Get-Item $script:HiddenFile -Force).Attributes = "Normal"
+            Remove-Item $script:HiddenFile -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $script:SpoofDir) { Remove-Item $script:SpoofDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Write-Host "[*] Mock artifacts cleaned up."
+    } catch {
+        Write-Host "[-] Cleanup issue: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
+function Show-Menu {
+    Show-Banner
+    Write-Host "--- Windows Coordinated Purple Team Emulation Selector ---"
+    foreach ($k in $Techniques.Keys) {
+        Write-Host (" [{0}]   Run cycle: {1} ({2})" -f $k, $Techniques[$k].Id, $Techniques[$k].Name)
+    }
+    Write-Host " [4]   Run ALL cycles"
+    Write-Host " [5]   Show summary report"
+    Write-Host " [999] Exit and clean up"
+    Write-Host ("-" * 80)
+}
+
+function Start-Menu {
+    while ($true) {
+        Show-Menu
+        $choice = (Read-Host "`n[?] Select option").Trim()
 
         if ($choice -eq "999") {
-            Write-Output "[*] Shutting down HarnessCore Purple Team Controller."
-            # Local cleaning of mock execution footprints safely on exit to maintain a clean environment
-            $mockFile = Join-Path $env:TEMP "mock_hidden_attrib.tmp"
-            $mockDir = Join-Path $env:TEMP "shadow_triage"
-            if (Test-Path $mockFile) { Remove-Item $mockFile -Force }
-            if (Test-Path $mockDir) { Remove-Item $mockDir -Recurse -Force }
+            Write-Host "[*] Shutting down HarnessCore."
+            if (-not $NoCleanup) { Remove-MockArtifacts }
             break
         }
-        Hotkey-Mapping -Choice $choice
+
+        if ($Techniques.Contains($choice)) {
+            Invoke-PurpleCycle -TechniqueId $Techniques[$choice].Id
+        } elseif ($choice -eq "4") {
+            foreach ($k in $Techniques.Keys) { Invoke-PurpleCycle -TechniqueId $Techniques[$k].Id }
+        } elseif ($choice -eq "5") {
+            Show-Summary
+        } else {
+            Write-Host "[-] Choice not recognized." -ForegroundColor DarkYellow
+            Start-Sleep -Seconds 1
+            continue
+        }
+        Read-Host "`n[*] Press Enter to return to menu" | Out-Null
     }
 }
 
-function Hotkey-Mapping {
-    param ([string]$Choice)
-    switch ($Choice) {
-        "1" { Execute-PurpleCycle -TechniqueId "T1059.001"; Read-Host "`n[*] Press Enter to return to menu" }
-        "2" { Execute-PurpleCycle -TechniqueId "T1564.001"; Read-Host "`n[*] Press Enter to return to menu" }
-        "3" { Execute-PurpleCycle -TechniqueId "T1036.005"; Read-Host "`n[*] Press Enter to return to menu" }
-        default { Write-Output "[-] Choice index not recognized."; Start-Sleep -Seconds 1 }
-    }
+# ------------------------------------------------------------------------------
+# Entry point
+# ------------------------------------------------------------------------------
+if (-not (Test-IsAdmin)) {
+    Write-Host "[!] Not running as Administrator. Security log (4688) checks will report LogUnavailable." -ForegroundColor DarkYellow
 }
 
-# Fire the script entry loop dynamically on execution
-Main
+if ($All) {
+    foreach ($k in $Techniques.Keys) { Invoke-PurpleCycle -TechniqueId $Techniques[$k].Id }
+    Show-Summary
+    if (-not $NoCleanup) { Remove-MockArtifacts }
+} elseif ($Technique) {
+    Invoke-PurpleCycle -TechniqueId $Technique
+    if (-not $NoCleanup) { Remove-MockArtifacts }
+} else {
+    Start-Menu
+}
